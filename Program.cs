@@ -7,6 +7,9 @@ using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Threading.Tasks;
+using System.Drawing;
+using System.Windows.Forms;
 
 namespace SeleZenZHMod
 {
@@ -24,14 +27,33 @@ namespace SeleZenZHMod
 
         private static bool _verbose;
 
+        [STAThread]
         private static int Main(string[] args)
         {
-            Console.OutputEncoding = Encoding.UTF8;
+            try { Console.OutputEncoding = Encoding.UTF8; } catch { }
+            EnsureModFolders();
+
+            if (args.Length == 0)
+            {
+                Application.EnableVisualStyles();
+                Application.SetCompatibleTextRenderingDefault(false);
+                Application.Run(new MainForm());
+                return 0;
+            }
+
+            return RunCommandLine(args);
+        }
+
+        private static void EnsureModFolders()
+        {
             Directory.CreateDirectory(ModRoot);
             Directory.CreateDirectory(BackupRoot);
             Directory.CreateDirectory(LogRoot);
             EnsureCustomDictionaryFile();
+        }
 
+        private static int RunCommandLine(string[] args)
+        {
             string launcherRootForReport = null;
             string asarPathForReport = null;
             try
@@ -92,6 +114,18 @@ namespace SeleZenZHMod
                 Console.Error.WriteLine("失败: " + ex.Message);
                 return 1;
             }
+        }
+
+        private static bool IsValidLauncherRoot(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return false;
+            return File.Exists(Path.Combine(path, LauncherExeName)) &&
+                   File.Exists(Path.Combine(path, "resources", "app.asar"));
+        }
+
+        private static string TryFindLauncherRoot()
+        {
+            try { return FindLauncherRoot(); } catch { return null; }
         }
 
         private static string FindLauncherRoot()
@@ -450,6 +484,17 @@ namespace SeleZenZHMod
             BackupSettingsIfUseful();
         }
 
+        private static void StartLauncherNoWait(string exePath)
+        {
+            if (!File.Exists(exePath)) throw new FileNotFoundException("启动器 EXE 不存在", exePath);
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = exePath,
+                WorkingDirectory = Path.GetDirectoryName(exePath),
+                UseShellExecute = true
+            });
+        }
+
         private static string SettingsPath
         {
             get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SelezenGames", "settings.json"); }
@@ -716,6 +761,434 @@ namespace SeleZenZHMod
                 if (_verbose) Console.WriteLine(message);
             }
             catch { }
+        }
+
+        private sealed class MainForm : Form
+        {
+            private readonly TextBox _launcherRootBox;
+            private readonly TextBox _installerPathBox;
+            private readonly CheckBox _installPatchBox;
+            private readonly CheckBox _startAfterBox;
+            private readonly TextBox _logBox;
+            private readonly Label _statusLabel;
+            private readonly List<Control> _busyControls = new List<Control>();
+
+            public MainForm()
+            {
+                Text = "SeleZen 中文增强 Mod 安装器";
+                StartPosition = FormStartPosition.CenterScreen;
+                MinimumSize = new Size(860, 640);
+                Size = new Size(960, 720);
+                Font = new Font("Microsoft YaHei UI", 9F);
+
+                var main = new TableLayoutPanel
+                {
+                    Dock = DockStyle.Fill,
+                    ColumnCount = 1,
+                    RowCount = 6,
+                    Padding = new Padding(18),
+                    AutoScroll = true
+                };
+                main.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                main.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                main.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                main.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                main.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+                main.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                Controls.Add(main);
+
+                var title = new Label
+                {
+                    Text = "SeleZen 中文增强 Mod 安装器",
+                    Dock = DockStyle.Top,
+                    AutoSize = true,
+                    Font = new Font(Font.FontFamily, 16F, FontStyle.Bold),
+                    Margin = new Padding(0, 0, 0, 6)
+                };
+                var subtitle = new Label
+                {
+                    Text = "选择客户端位置后，按按钮即可安装中文增强、恢复官方包或启动客户端。",
+                    Dock = DockStyle.Top,
+                    AutoSize = true,
+                    ForeColor = Color.DimGray,
+                    Margin = new Padding(0, 0, 0, 12)
+                };
+                var header = new Panel { Dock = DockStyle.Top, AutoSize = true };
+                header.Controls.Add(subtitle);
+                header.Controls.Add(title);
+                main.Controls.Add(header, 0, 0);
+
+                _launcherRootBox = new TextBox { Dock = DockStyle.Fill };
+                var clientBox = CreateGroup("客户端位置", "这里选择 SeleZen Games Launcher 的安装目录。目录里需要有 SeleZen Games Launcher.exe 和 resources\\app.asar。");
+                clientBox.Controls.Add(CreatePathRow(_launcherRootBox, "自动检测", DetectLauncher, "浏览...", BrowseLauncherRoot));
+                main.Controls.Add(clientBox, 0, 1);
+
+                _installerPathBox = new TextBox { Dock = DockStyle.Fill, Text = ModRoot };
+                var installBox = CreateGroup("安装器保存位置", "这是给普通用户保存这个 Mod 安装器 EXE 的位置，不会改变官方客户端路径。");
+                installBox.Controls.Add(CreatePathRow(_installerPathBox, "打开文件夹", OpenInstallerFolder, "浏览...", BrowseInstallerPath));
+                var saveInstaller = CreateButton("保存安装器副本到这里", SaveInstallerCopy);
+                installBox.Controls.Add(CreateButtonRow(saveInstaller, CreateButton("打开 Mod 数据文件夹", OpenModRoot), CreateButton("打开自定义词典", OpenCustomDictionary)));
+                main.Controls.Add(installBox, 0, 2);
+
+                _installPatchBox = new CheckBox { Text = "安装/更新中文增强补丁", Checked = true, AutoSize = true, Margin = new Padding(0, 8, 18, 8) };
+                _startAfterBox = new CheckBox { Text = "完成后启动客户端", Checked = true, AutoSize = true, Margin = new Padding(0, 8, 18, 8) };
+                var optionsFlow = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = true };
+                optionsFlow.Controls.Add(_installPatchBox);
+                optionsFlow.Controls.Add(_startAfterBox);
+
+                var actionBox = CreateGroup("操作", "不想打补丁就取消勾选；不想启动客户端就取消启动勾选。");
+                actionBox.Controls.Add(optionsFlow);
+                actionBox.Controls.Add(CreateButtonRow(
+                    CreateButton("执行所选操作", ExecuteSelected),
+                    CreateButton("只检查状态", CheckStatus),
+                    CreateButton("只启动客户端", StartLauncherFromGui),
+                    CreateButton("恢复官方包", RestoreOfficialFromGui)
+                ));
+                main.Controls.Add(actionBox, 0, 3);
+
+                _logBox = new TextBox
+                {
+                    Dock = DockStyle.Fill,
+                    Multiline = true,
+                    ReadOnly = true,
+                    ScrollBars = ScrollBars.Vertical,
+                    BackColor = Color.FromArgb(248, 248, 248),
+                    Font = new Font("Consolas", 9F)
+                };
+                main.Controls.Add(_logBox, 0, 4);
+
+                _statusLabel = new Label
+                {
+                    Dock = DockStyle.Fill,
+                    AutoSize = true,
+                    ForeColor = Color.DimGray,
+                    Text = "就绪",
+                    Margin = new Padding(0, 10, 0, 0)
+                };
+                main.Controls.Add(_statusLabel, 0, 5);
+
+                Load += (sender, args) =>
+                {
+                    DetectLauncher();
+                    AppendLog("提示: 双击默认打开这个窗口；高级用户仍可用 --status、--install-only、--launcher-root 等参数。");
+                };
+            }
+
+            private GroupBox CreateGroup(string title, string note)
+            {
+                var group = new GroupBox
+                {
+                    Text = title,
+                    Dock = DockStyle.Top,
+                    AutoSize = true,
+                    Padding = new Padding(12),
+                    Margin = new Padding(0, 8, 0, 8)
+                };
+                var panel = new TableLayoutPanel
+                {
+                    Dock = DockStyle.Top,
+                    AutoSize = true,
+                    ColumnCount = 1,
+                    RowCount = 2
+                };
+                panel.Controls.Add(new Label
+                {
+                    Text = note,
+                    Dock = DockStyle.Top,
+                    AutoSize = true,
+                    ForeColor = Color.DimGray,
+                    Margin = new Padding(0, 4, 0, 8)
+                }, 0, 0);
+                group.Controls.Add(panel);
+                return group;
+            }
+
+            private Control CreatePathRow(TextBox textBox, string leftButtonText, Action leftAction, string rightButtonText, Action rightAction)
+            {
+                var row = new TableLayoutPanel
+                {
+                    Dock = DockStyle.Top,
+                    AutoSize = true,
+                    ColumnCount = 3,
+                    Margin = new Padding(0, 0, 0, 8)
+                };
+                row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+                row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+                row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+                textBox.Margin = new Padding(0, 4, 8, 4);
+                row.Controls.Add(textBox, 0, 0);
+                row.Controls.Add(CreateButton(leftButtonText, leftAction), 1, 0);
+                row.Controls.Add(CreateButton(rightButtonText, rightAction), 2, 0);
+                return row;
+            }
+
+            private FlowLayoutPanel CreateButtonRow(params Button[] buttons)
+            {
+                var row = new FlowLayoutPanel
+                {
+                    Dock = DockStyle.Top,
+                    AutoSize = true,
+                    FlowDirection = FlowDirection.LeftToRight,
+                    WrapContents = true,
+                    Margin = new Padding(0, 8, 0, 4)
+                };
+                foreach (var button in buttons) row.Controls.Add(button);
+                return row;
+            }
+
+            private Button CreateButton(string text, Action action)
+            {
+                var button = new Button
+                {
+                    Text = text,
+                    AutoSize = true,
+                    Margin = new Padding(0, 4, 8, 4),
+                    Padding = new Padding(10, 4, 10, 4)
+                };
+                button.Click += (sender, args) => action();
+                _busyControls.Add(button);
+                return button;
+            }
+
+            private void DetectLauncher()
+            {
+                var found = TryFindLauncherRoot();
+                if (!string.IsNullOrWhiteSpace(found))
+                {
+                    _launcherRootBox.Text = found;
+                    SetStatus("已自动检测到客户端。");
+                    AppendLog("已检测到客户端: " + found);
+                }
+                else
+                {
+                    SetStatus("未自动检测到客户端，请手动选择。");
+                    AppendLog("未自动检测到客户端，请点击“浏览...”选择 SeleZen 客户端目录。");
+                }
+            }
+
+            private void BrowseLauncherRoot()
+            {
+                using (var dialog = new FolderBrowserDialog())
+                {
+                    dialog.Description = "选择 SeleZen Games Launcher 安装目录";
+                    dialog.SelectedPath = Directory.Exists(_launcherRootBox.Text) ? _launcherRootBox.Text : Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                    if (dialog.ShowDialog(this) != DialogResult.OK) return;
+                    _launcherRootBox.Text = NormalizeLauncherRoot(dialog.SelectedPath);
+                    AppendLog("已选择客户端目录: " + _launcherRootBox.Text);
+                }
+            }
+
+            private string NormalizeLauncherRoot(string selected)
+            {
+                if (string.IsNullOrWhiteSpace(selected)) return "";
+                if (File.Exists(Path.Combine(selected, "app.asar")) &&
+                    string.Equals(Path.GetFileName(selected), "resources", StringComparison.OrdinalIgnoreCase))
+                {
+                    return Directory.GetParent(selected)?.FullName ?? selected;
+                }
+                return selected;
+            }
+
+            private void BrowseInstallerPath()
+            {
+                using (var dialog = new FolderBrowserDialog())
+                {
+                    dialog.Description = "选择保存 Mod 安装器的位置";
+                    dialog.SelectedPath = Directory.Exists(_installerPathBox.Text) ? _installerPathBox.Text : ModRoot;
+                    if (dialog.ShowDialog(this) != DialogResult.OK) return;
+                    _installerPathBox.Text = dialog.SelectedPath;
+                    AppendLog("已选择安装器保存位置: " + dialog.SelectedPath);
+                }
+            }
+
+            private void OpenInstallerFolder()
+            {
+                var path = _installerPathBox.Text.Trim();
+                if (string.IsNullOrWhiteSpace(path)) path = ModRoot;
+                Directory.CreateDirectory(path);
+                Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
+            }
+
+            private void OpenModRoot()
+            {
+                Directory.CreateDirectory(ModRoot);
+                Process.Start(new ProcessStartInfo { FileName = ModRoot, UseShellExecute = true });
+            }
+
+            private void OpenCustomDictionary()
+            {
+                EnsureCustomDictionaryFile();
+                Process.Start(new ProcessStartInfo { FileName = CustomDictionaryFile, UseShellExecute = true });
+            }
+
+            private void SaveInstallerCopy()
+            {
+                RunBusy("正在保存安装器副本...", () =>
+                {
+                    var targetDir = _installerPathBox.Text.Trim();
+                    if (string.IsNullOrWhiteSpace(targetDir)) targetDir = ModRoot;
+                    Directory.CreateDirectory(targetDir);
+                    var currentExe = Process.GetCurrentProcess().MainModule.FileName;
+                    var targetExe = Path.Combine(targetDir, "SeleZenZHMod.exe");
+                    if (!string.Equals(Path.GetFullPath(currentExe), Path.GetFullPath(targetExe), StringComparison.OrdinalIgnoreCase))
+                    {
+                        File.Copy(currentExe, targetExe, true);
+                    }
+                    AppendLog("安装器已保存到: " + targetExe);
+                });
+            }
+
+            private void ExecuteSelected()
+            {
+                RunBusy("正在执行所选操作...", () =>
+                {
+                    var launcherRoot = GetValidLauncherRoot();
+                    var asarPath = Path.Combine(launcherRoot, "resources", "app.asar");
+                    var exePath = Path.Combine(launcherRoot, LauncherExeName);
+
+                    if (!_installPatchBox.Checked && !_startAfterBox.Checked)
+                    {
+                        AppendLog("未选择任何操作。请勾选“安装/更新中文增强补丁”或“完成后启动客户端”。");
+                        return;
+                    }
+
+                    if (_installPatchBox.Checked) InstallPatchForGui(launcherRoot, asarPath);
+                    if (_startAfterBox.Checked)
+                    {
+                        StartLauncherNoWait(exePath);
+                        AppendLog("客户端已启动。");
+                    }
+                });
+            }
+
+            private void CheckStatus()
+            {
+                RunBusy("正在检查状态...", () =>
+                {
+                    var launcherRoot = GetValidLauncherRoot();
+                    var asarPath = Path.Combine(launcherRoot, "resources", "app.asar");
+                    var exePath = Path.Combine(launcherRoot, LauncherExeName);
+                    var status = GetPatchStatus(asarPath);
+                    var version = File.Exists(exePath) ? FileVersionInfo.GetVersionInfo(exePath).ProductVersion : "";
+                    var settings = ReadJsonObject(SettingsPath);
+                    var site = settings != null && settings.ContainsKey("siteTranslation") ? settings["siteTranslation"] as Dictionary<string, object> : null;
+                    AppendLog("客户端路径: " + launcherRoot);
+                    AppendLog("客户端版本: " + (string.IsNullOrWhiteSpace(version) ? "未知" : version));
+                    AppendLog("补丁状态: " + (status.IsPatched ? "已安装" : "需要安装/更新"));
+                    AppendLog("缺失标记: " + (status.IsPatched ? "-" : string.Join(", ", status.Markers.Where(kv => !kv.Value).Select(kv => kv.Key))));
+                    AppendLog("网站 AI: " + (GetBoolValue(site, "enabled", false) ? "已启用" : "未启用"));
+                    AppendLog("DeepSeek Key: " + (HasEncryptedSiteTranslation(site) ? "已保存" : "未保存"));
+                    AppendLog("Key 备份: " + (HasEncryptedKeyBackup() ? "有" : "没有"));
+                });
+            }
+
+            private void StartLauncherFromGui()
+            {
+                RunBusy("正在启动客户端...", () =>
+                {
+                    var launcherRoot = GetValidLauncherRoot();
+                    StartLauncherNoWait(Path.Combine(launcherRoot, LauncherExeName));
+                    AppendLog("客户端已启动。");
+                });
+            }
+
+            private void RestoreOfficialFromGui()
+            {
+                if (MessageBox.Show(this, "确定要恢复最近一次官方 app.asar 备份吗？恢复后中文增强会失效，之后可以再安装回来。", "恢复官方包", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+                RunBusy("正在恢复官方包...", () =>
+                {
+                    var launcherRoot = GetValidLauncherRoot();
+                    StopLauncherProcesses();
+                    RestoreLatestOfficialAsar(Path.Combine(launcherRoot, "resources", "app.asar"));
+                    AppendLog("已恢复最近一次官方 app.asar。");
+                });
+            }
+
+            private void InstallPatchForGui(string launcherRoot, string asarPath)
+            {
+                var status = GetPatchStatus(asarPath);
+                if (!status.IsPatched)
+                {
+                    AppendLog("正在安装/更新中文增强补丁...");
+                    WriteUpdateDetectionLog(launcherRoot, asarPath, status);
+                    StopLauncherProcesses();
+                    if (!status.HasAnyPatch) BackupOfficialAsar(launcherRoot, asarPath);
+                    PatchAsar(asarPath);
+                    RestoreSettingsBackupOrDefaults();
+                    AppendLog("中文增强补丁已安装。");
+                }
+                else
+                {
+                    RestoreSettingsBackupOrDefaults();
+                    AppendLog("当前客户端已包含最新中文增强补丁。");
+                }
+                BackupSettingsIfUseful();
+            }
+
+            private string GetValidLauncherRoot()
+            {
+                var launcherRoot = NormalizeLauncherRoot(_launcherRootBox.Text.Trim());
+                if (!IsValidLauncherRoot(launcherRoot))
+                {
+                    throw new InvalidOperationException("客户端目录不正确。请选择包含 SeleZen Games Launcher.exe 和 resources\\app.asar 的目录。");
+                }
+                return launcherRoot;
+            }
+
+            private void RunBusy(string status, Action action)
+            {
+                SetBusy(true);
+                SetStatus(status);
+                Task.Run(() =>
+                {
+                    try
+                    {
+                        action();
+                        SetStatus("完成");
+                    }
+                    catch (Exception ex)
+                    {
+                        Log("GUI ERROR " + ex);
+                        AppendLog("失败: " + ex.Message);
+                        SetStatus("失败: " + ex.Message);
+                    }
+                    finally
+                    {
+                        SetBusy(false);
+                    }
+                });
+            }
+
+            private void SetBusy(bool busy)
+            {
+                if (InvokeRequired)
+                {
+                    BeginInvoke(new Action<bool>(SetBusy), busy);
+                    return;
+                }
+                foreach (var control in _busyControls) control.Enabled = !busy;
+                UseWaitCursor = busy;
+            }
+
+            private void SetStatus(string text)
+            {
+                if (InvokeRequired)
+                {
+                    BeginInvoke(new Action<string>(SetStatus), text);
+                    return;
+                }
+                _statusLabel.Text = text;
+            }
+
+            private void AppendLog(string message)
+            {
+                if (InvokeRequired)
+                {
+                    BeginInvoke(new Action<string>(AppendLog), message);
+                    return;
+                }
+                _logBox.AppendText("[" + DateTime.Now.ToString("HH:mm:ss") + "] " + message + Environment.NewLine);
+            }
         }
     }
 
