@@ -4,6 +4,10 @@
 
 这个 Mod 安装器不需要放在官方客户端目录里。官方客户端更新后，如果 `app.asar` 被覆盖，只要再次运行 `SeleZenZHMod.exe`，它会检测当前补丁状态并自动重新安装中文增强补丁。
 
+## 直接下载
+
+普通用户不需要下载源码，直接到 [Releases 页面](https://github.com/craigebielec322-wq/selezen-zh-mod/releases/latest) 下载 `SeleZenZHMod-v0.1.0.exe`，双击打开图形安装器即可。
+
 ## 主要功能
 
 - 给启动器语言切换增加 `zh-CN` 简体中文。
