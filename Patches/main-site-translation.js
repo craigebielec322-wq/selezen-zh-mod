@@ -1,11 +1,13 @@
 // SELEZEN_ZH_MOD_MAIN_TRANSLATION
 // SELEZEN_ZH_MOD_CUSTOM_DICTIONARY_V6
+// SELEZEN_ZH_MOD_KEY_PERSISTENCE_V7
 const SITE_TRANSLATION_CACHE_LIMIT = 2000;
 const SITE_TRANSLATION_MODELS = ['deepseek-v4-flash', 'deepseek-v4-pro'];
 const DEFAULT_SITE_TRANSLATION_MODEL = 'deepseek-v4-flash';
 const DEEPSEEK_CHAT_COMPLETIONS_URL = 'https://api.deepseek.com/chat/completions';
 const SITE_TRANSLATION_MOD_ROOT = path.join(process.env.LOCALAPPDATA || app.getPath('userData'), 'SeleZen-ZH-Mod');
 const SITE_TRANSLATION_CUSTOM_DICTIONARY_FILE = path.join(SITE_TRANSLATION_MOD_ROOT, 'custom-dictionary.json');
+const SITE_TRANSLATION_SETTINGS_BACKUP_FILE = path.join(SITE_TRANSLATION_MOD_ROOT, 'settings-backup.json');
 let siteTranslationCache = { version: 1, entries: {} };
 let siteTranslationCacheLoaded = false;
 let siteTranslationLastStatus = null;
@@ -20,6 +22,63 @@ function normalizeSiteTranslationSettings(source) {
   };
 }
 
+function readSiteTranslationSettingsBackup() {
+  try {
+    const raw = fs.readFileSync(SITE_TRANSLATION_SETTINGS_BACKUP_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    return normalizeSiteTranslationSettings(parsed?.siteTranslation);
+  } catch (_) {
+    return normalizeSiteTranslationSettings(null);
+  }
+}
+
+function writeSiteTranslationSettingsBackup() {
+  try {
+    const cfg = normalizeSiteTranslationSettings(settings.siteTranslation);
+    if (!cfg.apiKeyEncrypted) return;
+    ensureDir(SITE_TRANSLATION_MOD_ROOT);
+    const backup = {
+      ...settings,
+      language: settings.language || 'zh-CN',
+      siteTranslation: cfg
+    };
+    fs.writeFileSync(SITE_TRANSLATION_SETTINGS_BACKUP_FILE, JSON.stringify(backup, null, 2));
+  } catch (err) {
+    console.warn('Failed to save site translation settings backup', err);
+  }
+}
+
+function ensureSiteTranslationSettingsAvailable() {
+  const hasCurrentObject = !!(settings.siteTranslation && typeof settings.siteTranslation === 'object');
+  const current = normalizeSiteTranslationSettings(settings.siteTranslation);
+  if (hasCurrentObject && current.apiKeyEncrypted) return current;
+
+  const backup = readSiteTranslationSettingsBackup();
+  let next = current;
+  if (backup.apiKeyEncrypted) {
+    next = normalizeSiteTranslationSettings({
+      enabled: hasCurrentObject ? current.enabled : backup.enabled,
+      model: hasCurrentObject ? current.model : backup.model,
+      apiKeyEncrypted: current.apiKeyEncrypted || backup.apiKeyEncrypted
+    });
+  } else if (!hasCurrentObject) {
+    next = normalizeSiteTranslationSettings(null);
+  }
+
+  const changed =
+    !hasCurrentObject ||
+    JSON.stringify(normalizeSiteTranslationSettings(settings.siteTranslation)) !== JSON.stringify(next);
+  if (changed) {
+    settings.siteTranslation = next;
+    try {
+      saveSettings();
+    } catch (err) {
+      console.warn('Failed to restore site translation settings', err);
+    }
+  }
+  return next;
+}
+
 function encryptSiteTranslationApiKey(apiKey) {
   const value = String(apiKey || '').trim();
   if (!value) return '';
@@ -30,7 +89,8 @@ function encryptSiteTranslationApiKey(apiKey) {
 }
 
 function decryptSiteTranslationApiKey() {
-  const encrypted = settings.siteTranslation?.apiKeyEncrypted;
+  const cfg = ensureSiteTranslationSettingsAvailable();
+  const encrypted = cfg.apiKeyEncrypted;
   if (!encrypted) return '';
   if (!safeStorage || !safeStorage.isEncryptionAvailable || !safeStorage.isEncryptionAvailable()) return '';
   try {
@@ -43,7 +103,7 @@ function decryptSiteTranslationApiKey() {
 
 function getSiteTranslationPublicConfig() {
   ensureSiteTranslationCacheLoaded();
-  const cfg = normalizeSiteTranslationSettings(settings.siteTranslation);
+  const cfg = ensureSiteTranslationSettingsAvailable();
   const customDictionary = loadSiteTranslationCustomDictionary();
   return {
     ok: true,
@@ -226,7 +286,7 @@ function broadcastSiteTranslationConfig() {
 
 async function translateSiteBatch(payload = {}) {
   ensureSiteTranslationCacheLoaded();
-  const cfg = normalizeSiteTranslationSettings(settings.siteTranslation);
+  const cfg = ensureSiteTranslationSettingsAvailable();
   if (!cfg.enabled || settings.language !== 'zh-CN') return { ok: true, enabled: false, translations: [] };
   const apiKey = decryptSiteTranslationApiKey();
   if (!apiKey) return { ok: false, error: 'DeepSeek API Key is not saved', translations: [] };

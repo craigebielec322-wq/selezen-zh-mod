@@ -4,11 +4,13 @@
     // SELEZEN_ZH_MOD_DETAIL_FIRST_V4
     // SELEZEN_ZH_MOD_SMALL_CONTROLS_V5
     // SELEZEN_ZH_MOD_CUSTOM_DICTIONARY_V6
+    // SELEZEN_ZH_MOD_FIXED_MODULES_V7
     const selezenZhMod = (() => {
       let config = { enabled: false, model: 'deepseek-v4-flash', hasKey: false, models: ['deepseek-v4-flash', 'deepseek-v4-pro'], cacheSize: 0 };
       let panelReady = false;
       let statusEl = null;
       let runningTranslation = false;
+      let shellTranslationTimer = null;
 
       function isZh() {
         return currentLanguage === 'zh-CN';
@@ -22,12 +24,61 @@
         return String(value || '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
       }
 
+      function ensurePanelStyles() {
+        if (document.getElementById('selezen-zh-mod-style')) return;
+        const style = document.createElement('style');
+        style.id = 'selezen-zh-mod-style';
+        style.textContent = `
+          #site-translation-panel .zh-mod-field-row {
+            display: grid;
+            grid-template-columns: 150px minmax(260px, 1fr) max-content;
+            gap: 12px;
+            align-items: center;
+            margin-top: 12px;
+          }
+          #site-translation-panel .zh-mod-label {
+            min-width: 0;
+            white-space: nowrap;
+          }
+          #site-translation-panel .zh-mod-field-row .search-box {
+            width: 100%;
+            min-width: 0;
+            box-sizing: border-box;
+          }
+          #site-translation-panel .zh-mod-key-status,
+          #site-translation-panel .zh-mod-field-note {
+            white-space: nowrap;
+          }
+          #site-translation-panel .zh-mod-actions-row {
+            align-items: flex-start;
+            gap: 16px;
+          }
+          #site-translation-panel .zh-mod-actions-row .settings-actions {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+            gap: 8px;
+          }
+          @media (max-width: 960px) {
+            #site-translation-panel .zh-mod-field-row {
+              grid-template-columns: 1fr;
+            }
+            #site-translation-panel .zh-mod-key-status,
+            #site-translation-panel .zh-mod-field-note {
+              white-space: normal;
+            }
+          }
+        `;
+        document.head?.appendChild(style);
+      }
+
       async function loadConfig() {
         try {
           const res = await window.electronAPI.siteTranslationGetConfig?.();
           if (res?.ok) config = { ...config, ...res };
         } catch (_) {}
         renderConfig();
+        scheduleShellTranslation(80);
         return config;
       }
 
@@ -35,6 +86,7 @@
         if (panelReady || !settingsView) return;
         const host = settingsView.querySelector('.settings-form') || settingsView;
         if (!host || document.getElementById('site-translation-panel')) return;
+        ensurePanelStyles();
         const group = document.createElement('div');
         group.className = 'settings-group';
         group.id = 'site-translation-panel';
@@ -46,20 +98,20 @@
             </div>
             <label class="toggle-line"><input id="site-translation-enabled" type="checkbox" /> <span>启用</span></label>
           </div>
-          <label class="settings-field settings-field-wide">
-            <span>DeepSeek API Key</span>
+          <div class="settings-field settings-field-wide zh-mod-field-row">
+            <span class="zh-mod-label">DeepSeek API Key</span>
             <input id="site-translation-api-key" class="search-box" type="password" autocomplete="off" placeholder="输入 DeepSeek API Key" />
-            <span class="note" id="site-translation-key-status">未保存密钥</span>
-          </label>
-          <label class="settings-field settings-field-wide">
-            <span>DeepSeek 模型</span>
+            <span class="note zh-mod-key-status" id="site-translation-key-status">未保存密钥</span>
+          </div>
+          <div class="settings-field settings-field-wide zh-mod-field-row">
+            <span class="zh-mod-label">DeepSeek 模型</span>
             <select id="site-translation-model" class="search-box">
               <option value="deepseek-v4-flash">deepseek-v4-flash</option>
               <option value="deepseek-v4-pro">deepseek-v4-pro</option>
             </select>
-            <span class="note">Flash 更快更省；Pro 可用于更复杂文本。</span>
-          </label>
-          <div class="settings-row">
+            <span class="note zh-mod-field-note">Flash 更快更省；Pro 可用于更复杂文本。</span>
+          </div>
+          <div class="settings-row zh-mod-actions-row">
             <div>
               <div>翻译缓存</div>
               <div class="note" id="site-translation-cache-status">缓存: 0</div>
@@ -112,6 +164,7 @@
           config = { ...config, ...res };
           if (keyInput) keyInput.value = '';
           renderConfig();
+          scheduleShellTranslation(80);
           setStatus('翻译设置已保存');
         } else {
           setStatus(`错误: ${res?.error || '保存失败'}`);
@@ -178,10 +231,13 @@
           return !!element?.closest?.('.torrent-download-btn, .torrent-magnet-btn, .torrent-older__toggle, .dynamic-release-description-toggle, .torrent-actions, .torrent-download-wrap, .keep-action, .keep-full_link, .center-t');
         }
 
-        function isIgnored(element) {
+        function isIgnored(element, forAttribute = false) {
           if (!element) return true;
           if (element.closest?.('.torrent-text') && !isAllowedTorrentControl(element)) return true;
-          return !!element.closest?.('script, style, noscript, svg, canvas, code, pre, textarea, input, select, option, .keep-detal_text, .dynamic-release-description-text');
+          const selector = forAttribute
+            ? 'script, style, noscript, svg, canvas, code, pre, select, option, .keep-detal_text, .dynamic-release-description-text'
+            : 'script, style, noscript, svg, canvas, code, pre, textarea, input, select, option, .keep-detal_text, .dynamic-release-description-text';
+          return !!element.closest?.(selector);
         }
 
         if (!enabled) {
@@ -239,7 +295,7 @@
           attrNames.forEach(attr => {
             document.querySelectorAll(`[${attr}]`).forEach(element => {
               try {
-                if (isIgnored(element) && !isAllowedTorrentControl(element)) return;
+                if (isIgnored(element, true) && !isAllowedTorrentControl(element)) return;
                 const originalAttrName = `data-selezen-zh-original-${attr.replace(/[^a-z0-9_-]/gi, '-')}`;
                 const original = element.getAttribute(originalAttrName) || element.getAttribute(attr) || '';
                 const translated = translate(original);
@@ -259,8 +315,16 @@
         'Игры': '游戏',
         'Фильмы': '电影',
         'Лаунчер': '启动器',
+        'Библиотека': '我的库',
+        'Моя библиотека': '我的库',
+        'Мои игры': '我的游戏',
+        'Каталог': '目录',
         'Подборки': '合集',
         'Лучшее': '精选',
+        'Новинки': '新品',
+        'Популярное': '热门',
+        'Все игры': '全部游戏',
+        'Все фильмы': '全部电影',
         'Расширенный поиск': '高级搜索',
         'О сайте': '关于本站',
         'Контакты': '联系方式',
@@ -286,8 +350,20 @@
         'Входит в топ за месяц': '进入本月榜单',
         'Входит в топ  за месяц': '进入本月榜单',
         'Сейчас популярно': '当前热门',
+        'Поиск по сайту': '站内搜索',
+        'Поиск по сайту...': '搜索网站...',
+        'Поиск игры': '搜索游戏',
+        'Найти игру': '查找游戏',
+        'Показать ещё': '显示更多',
+        'Показать еще': '显示更多',
+        'Загрузить ещё': '加载更多',
+        'Загрузить еще': '加载更多',
         'Скачать игры на ПК через торрент': '通过种子下载 PC 游戏',
         'Скачать игры на ПК торрентом': '下载 PC 游戏种子',
+        'Игры 2026 года': '2026 年游戏',
+        'Игры 2025 года': '2025 年游戏',
+        'Игры 2024 года': '2024 年游戏',
+        'Игры 2023 года': '2023 年游戏',
         'Года': '年份',
         'Жанры': '类型',
         'Жанры и подборки': '类型与合集',
@@ -313,6 +389,10 @@
         'Видео': '视频',
         'Смотреть видео': '观看视频',
         'Скачать изображение': '下载图片',
+        'Назад': '后退',
+        'Вперёд': '前进',
+        'Вперед': '前进',
+        'Обновить': '刷新',
         'Закрыть (Esc)': '关闭 (Esc)',
         'Закрыть': '关闭',
         'Следующее изображение': '下一张图片',
@@ -370,16 +450,93 @@
         'Сохранить': '保存',
         'Удалить': '删除',
         'Загрузка. Пожалуйста, подождите...': '正在加载，请稍候...',
+        'Загрузка': '加载中',
+        'Загрузки': '下载',
+        'Активные загрузки': '下载任务',
+        'История загрузок': '下载历史',
+        'Нет загрузок': '暂无下载任务',
+        'Нет активных загрузок': '暂无活动下载',
+        'Выберите загрузку': '选择一个下载任务',
+        'Добавить ссылку': '添加链接',
+        'Добавить файл': '添加文件',
+        'Добавить торрент': '添加种子',
+        'Добавить magnet-ссылку': '添加磁力链接',
+        'Magnet-ссылка': '磁力链接',
+        'Magnet ссылка': '磁力链接',
+        'Выбрать файл': '选择文件',
+        'Выберите файл': '选择文件',
+        'Удалить задачу': '移除任务',
+        'Удалить с файлами': '删除任务和文件',
+        'Удалить файлы': '删除文件',
+        'Удалить файлы с диска': '同时删除磁盘文件',
+        'Открыть папку': '打开文件夹',
+        'Открыть папку загрузки': '打开下载文件夹',
+        'Открыть папку игры': '打开游戏文件夹',
+        'Пауза': '暂停',
+        'Приостановить': '暂停',
+        'Продолжить': '继续',
+        'Возобновить': '继续',
+        'Старт': '开始',
+        'Начать': '开始',
+        'Перепроверить': '重新校验',
+        'Проверить хеш': '校验哈希',
+        'Проверка файлов': '校验文件',
+        'Проверка': '校验中',
+        'Скачивание': '下载中',
+        'Скачивается': '下载中',
+        'Раздача': '做种中',
+        'Раздаётся': '做种中',
+        'Раздается': '做种中',
+        'Завершено': '已完成',
+        'Завершена': '已完成',
+        'Завершённые': '已完成',
+        'Завершенные': '已完成',
+        'Финализация': '正在收尾',
+        'На паузе': '已暂停',
+        'Пауза включена': '已暂停',
+        'Ожидание': '等待中',
+        'Ошибка': '错误',
+        'Ошибки': '错误',
+        'Скорость': '速度',
+        'Статус': '状态',
+        'Прогресс': '进度',
+        'Источник': '来源',
+        'Пиры': '连接',
+        'Сиды': '做种',
+        'Отдача': '上传',
+        'Приём': '下载',
+        'Прием': '下载',
+        'Осталось': '剩余时间',
+        'Добавлено': '已添加',
+        'Добавлен': '已添加',
+        'Размер': '大小',
         'Скопировать': '复制',
         'Скопировано!': '已复制!',
         'Установить': '安装',
         'Установить игру': '安装游戏',
         'Скачать торрент': '下载种子',
+        'Скачать torrent': '下载种子',
+        'Скачать .torrent': '下载 .torrent',
+        'Скачать торрент файл': '下载种子文件',
+        'Скачать торрент-файл': '下载种子文件',
+        'Скачать torrent файл': '下载种子文件',
+        'Торрент': '种子',
+        'торрент': '种子',
+        'Торрент файл': '种子文件',
+        'Торрент-файл': '种子文件',
+        'torrent файл': '种子文件',
+        'Файл torrent': '种子文件',
+        'Магнет ссылка': '磁力链接',
+        'Магнитная ссылка': '磁力链接',
         'Скачать репак от SeleZen': '下载 SeleZen 整合版',
         'Скачать репак от селезень': '下载 SeleZen 整合版',
         'Скачать Другие раздачи': '下载其他资源',
         'Скачать другие раздачи': '下载其他资源',
         'Другие раздачи': '其他资源',
+        'Раздачи': '资源',
+        'Раздача обновлена': '资源已更新',
+        'Старая раздача': '旧资源',
+        'Новая раздача': '新资源',
         'Скачать SeleZen Launcher': '下载 SeleZen Launcher',
         'Скачать лаунчер': '下载启动器',
         'Скачать через лаунчер': '通过启动器下载',
@@ -394,6 +551,38 @@
         'Seeders': '做种',
         'Peers': '连接',
         'Completed': '完成下载',
+        'Seeds': '做种',
+        'Leechers': '下载连接',
+        'Downloaded': '已下载',
+        'Download': '下载',
+        'Downloads': '下载',
+        'Library': '我的库',
+        'My library': '我的库',
+        'My games': '我的游戏',
+        'Install': '安装',
+        'Installed': '已安装',
+        'Update': '更新',
+        'Play': '启动',
+        'Launch': '启动',
+        'Open folder': '打开文件夹',
+        'Open page': '打开页面',
+        'Remove': '移除',
+        'Pause': '暂停',
+        'Resume': '继续',
+        'Recheck': '重新校验',
+        'Status': '状态',
+        'Progress': '进度',
+        'Speed': '速度',
+        'Source': '来源',
+        'Size': '大小',
+        'Added': '已添加',
+        'Checking': '校验中',
+        'Downloading': '下载中',
+        'Paused': '已暂停',
+        'Seeding': '做种中',
+        'Finalizing': '正在收尾',
+        'Completed': '已完成',
+        'Error': '错误',
         'Button group': '按钮组',
         'Плохо': '很差',
         'Приемлемо': '一般',
@@ -613,6 +802,23 @@
       function buildKeySiteTranslationScript(enabled) {
         const customDictionary = config.customDictionary && typeof config.customDictionary === 'object' ? config.customDictionary : {};
         return `(${keySiteTranslationRuntime.toString()})(${JSON.stringify(JSON.stringify({ enabled: !!enabled, entries: { ...keySiteFallbackTranslations, ...customDictionary } }))});`;
+      }
+
+      function applyShellTranslationFallback() {
+        const customDictionary = config.customDictionary && typeof config.customDictionary === 'object' ? config.customDictionary : {};
+        return keySiteTranslationRuntime(JSON.stringify({
+          enabled: isZh(),
+          entries: { ...keySiteFallbackTranslations, ...customDictionary }
+        }));
+      }
+
+      function scheduleShellTranslation(delay) {
+        if (shellTranslationTimer) clearTimeout(shellTranslationTimer);
+        shellTranslationTimer = setTimeout(() => {
+          try {
+            applyShellTranslationFallback();
+          } catch (_) {}
+        }, delay || 120);
       }
 
       async function applyKeySiteTranslationFallback() {
@@ -1128,6 +1334,7 @@
         try {
           setStatus('正在启动当前页面翻译...');
           await loadConfig();
+          scheduleShellTranslation(50);
           const keyResult = await applyKeySiteTranslationFallback();
           const detailResult = await runDetailSiteAiTranslation();
           const generalResult = await runGeneralSiteAiTranslation();
@@ -1146,12 +1353,24 @@
       function init() {
         ensurePanel();
         loadConfig();
+        scheduleShellTranslation(250);
+        try {
+          const observer = new MutationObserver(() => scheduleShellTranslation(180));
+          observer.observe(document.body || document.documentElement, {
+            childList: true,
+            subtree: true,
+            characterData: true,
+            attributes: true,
+            attributeFilter: ['title', 'aria-label', 'alt', 'placeholder']
+          });
+        } catch (_) {}
         siteView?.addEventListener?.('dom-ready', () => scheduleTranslate(900));
         siteView?.addEventListener?.('did-navigate', () => scheduleTranslate(1200));
         siteView?.addEventListener?.('did-navigate-in-page', () => scheduleTranslate(900));
         window.electronAPI?.onLanguageChanged?.(payload => {
           setTimeout(() => {
             loadConfig();
+            scheduleShellTranslation(100);
             scheduleTranslate(300);
           }, 100);
         });

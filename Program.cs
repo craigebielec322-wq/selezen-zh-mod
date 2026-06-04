@@ -148,8 +148,12 @@ namespace SeleZenZHMod
             var markers = new Dictionary<string, bool>
             {
                 ["zh-CN"] = Contains(asar, "localization.js", "zh-CN"),
+                ["localization v7"] = Contains(asar, "localization.js", "SELEZEN_ZH_MOD_LOCALIZATION_V7"),
                 ["site-translation-translate-batch"] = Contains(asar, "main.js", "site-translation-translate-batch"),
+                ["key persistence v7"] = Contains(asar, "main.js", "SELEZEN_ZH_MOD_KEY_PERSISTENCE_V7"),
+                ["translation ipc v7"] = Contains(asar, "main.js", "SELEZEN_ZH_MOD_MAIN_TRANSLATION_IPC_V7"),
                 ["shell detail speedup"] = Contains(asar, "shell.html", "detailChunkChars = 1500") && Contains(asar, "shell.html", "concurrentRequests = 2"),
+                ["fixed modules v7"] = Contains(asar, "shell.html", "SELEZEN_ZH_MOD_FIXED_MODULES_V7"),
                 ["custom dictionary v6"] = Contains(asar, "main.js", "SELEZEN_ZH_MOD_CUSTOM_DICTIONARY_V6") && Contains(asar, "shell.html", "SELEZEN_ZH_MOD_CUSTOM_DICTIONARY_V6"),
                 ["site preload marker"] = Contains(asar, "site-preload.js", "DETAIL_AI_TEXT_CONTAINER_SELECTOR")
             };
@@ -182,8 +186,12 @@ namespace SeleZenZHMod
                 var status = new PatchStatus(new Dictionary<string, bool>
                 {
                     ["zh-CN"] = Contains(verify, "localization.js", "zh-CN"),
+                    ["localization v7"] = Contains(verify, "localization.js", "SELEZEN_ZH_MOD_LOCALIZATION_V7"),
                     ["site-translation-translate-batch"] = Contains(verify, "main.js", "site-translation-translate-batch"),
+                    ["key persistence v7"] = Contains(verify, "main.js", "SELEZEN_ZH_MOD_KEY_PERSISTENCE_V7"),
+                    ["translation ipc v7"] = Contains(verify, "main.js", "SELEZEN_ZH_MOD_MAIN_TRANSLATION_IPC_V7"),
                     ["shell detail speedup"] = Contains(verify, "shell.html", "detailChunkChars = 1500") && Contains(verify, "shell.html", "concurrentRequests = 2"),
+                    ["fixed modules v7"] = Contains(verify, "shell.html", "SELEZEN_ZH_MOD_FIXED_MODULES_V7"),
                     ["custom dictionary v6"] = Contains(verify, "main.js", "SELEZEN_ZH_MOD_CUSTOM_DICTIONARY_V6") && Contains(verify, "shell.html", "SELEZEN_ZH_MOD_CUSTOM_DICTIONARY_V6"),
                     ["site preload marker"] = Contains(verify, "site-preload.js", "DETAIL_AI_TEXT_CONTAINER_SELECTOR")
                 });
@@ -208,8 +216,19 @@ namespace SeleZenZHMod
         private static void PatchLocalization(AsarArchive asar)
         {
             var text = asar.GetText("localization.js");
+            if (text.Contains("SELEZEN_ZH_MOD_LOCALIZATION_V7"))
+            {
+                asar.SetText("localization.js", text);
+                return;
+            }
             if (text.Contains("SELEZEN_ZH_MOD_LOCALIZATION"))
             {
+                var markerIndex = text.IndexOf("SELEZEN_ZH_MOD_LOCALIZATION", StringComparison.Ordinal);
+                var start = markerIndex;
+                while (start > 0 && text[start - 1] != '\n' && text[start - 1] != '\r') start -= 1;
+                var end = text.IndexOf("  function normalizeLanguage(value) {", markerIndex, StringComparison.Ordinal);
+                if (end < 0) throw new InvalidOperationException("localization.js 找不到 normalizeLanguage 锚点，无法替换旧中文语言补丁。");
+                text = text.Substring(0, start) + ReadPatch("localization-zh.js").TrimEnd() + "\r\n" + text.Substring(end);
                 asar.SetText("localization.js", text);
                 return;
             }
@@ -243,7 +262,7 @@ namespace SeleZenZHMod
                     "autoLaunch: true,\r\n  language: normalizeLanguage(DEFAULT_LANGUAGE),\r\n  siteTranslation: {\r\n    enabled: false,\r\n    model: 'deepseek-v4-flash',\r\n    apiKeyEncrypted: ''\r\n  }\r\n};");
             }
             var mainTranslationPatch = ReadPatch("main-site-translation.js");
-            if (text.Contains("SELEZEN_ZH_MOD_MAIN_TRANSLATION") && !text.Contains("SELEZEN_ZH_MOD_CUSTOM_DICTIONARY_V6"))
+            if (text.Contains("SELEZEN_ZH_MOD_MAIN_TRANSLATION") && !text.Contains("SELEZEN_ZH_MOD_KEY_PERSISTENCE_V7"))
             {
                 var markerIndex = text.IndexOf("SELEZEN_ZH_MOD_MAIN_TRANSLATION", StringComparison.Ordinal);
                 var start = markerIndex;
@@ -265,7 +284,16 @@ namespace SeleZenZHMod
                     "settings.language = normalizeLanguage(null);\r\n    shouldSave = true;",
                     "settings.language = normalizeLanguage(null);\r\n    settings.siteTranslation = normalizeSiteTranslationSettings(null);\r\n    shouldSave = true;");
             }
-            if (!text.Contains("SELEZEN_ZH_MOD_MAIN_TRANSLATION_IPC"))
+            if (text.Contains("SELEZEN_ZH_MOD_MAIN_TRANSLATION_IPC") && !text.Contains("SELEZEN_ZH_MOD_MAIN_TRANSLATION_IPC_V7"))
+            {
+                var markerIndex = text.IndexOf("SELEZEN_ZH_MOD_MAIN_TRANSLATION_IPC", StringComparison.Ordinal);
+                var start = markerIndex;
+                while (start > 0 && text[start - 1] != '\n' && text[start - 1] != '\r') start -= 1;
+                var end = text.IndexOf("ipcMain.handle('update-check'", markerIndex, StringComparison.Ordinal);
+                if (end < 0) throw new InvalidOperationException("main.js 找不到 update-check 锚点，无法替换旧翻译 IPC 补丁。");
+                text = text.Substring(0, start) + ReadPatch("main-site-translation-ipc.js").TrimEnd() + "\r\n" + text.Substring(end);
+            }
+            else if (!text.Contains("SELEZEN_ZH_MOD_MAIN_TRANSLATION_IPC"))
             {
                 text = InsertBefore(text, "ipcMain.handle('update-check'", ReadPatch("main-site-translation-ipc.js") + "\r\n");
             }
@@ -304,7 +332,7 @@ namespace SeleZenZHMod
         {
             var text = asar.GetText("shell.html");
             var patch = ReadPatch("shell-zh-mod.js").TrimEnd();
-            if (text.Contains("SELEZEN_ZH_MOD_CUSTOM_DICTIONARY_V6"))
+            if (text.Contains("SELEZEN_ZH_MOD_FIXED_MODULES_V7"))
             {
                 asar.SetText("shell.html", text);
                 return;

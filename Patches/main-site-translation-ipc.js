@@ -1,10 +1,12 @@
 // SELEZEN_ZH_MOD_MAIN_TRANSLATION_IPC
+// SELEZEN_ZH_MOD_MAIN_TRANSLATION_IPC_V7
 ipcMain.handle('site-translation-get-config', () => getSiteTranslationPublicConfig());
 
 ipcMain.handle('site-translation-set-config', (_event, payload = {}) => {
   try {
+    const current = ensureSiteTranslationSettingsAvailable();
     const next = normalizeSiteTranslationSettings({
-      ...settings.siteTranslation,
+      ...current,
       enabled: payload.enabled,
       model: payload.model
     });
@@ -15,6 +17,7 @@ ipcMain.handle('site-translation-set-config', (_event, payload = {}) => {
     if (payload.clearApiKey) next.apiKeyEncrypted = '';
     settings.siteTranslation = next;
     saveSettings();
+    writeSiteTranslationSettingsBackup();
     broadcastSiteTranslationConfig();
     return getSiteTranslationPublicConfig();
   } catch (err) {
@@ -24,7 +27,7 @@ ipcMain.handle('site-translation-set-config', (_event, payload = {}) => {
 
 ipcMain.handle('site-translation-test', async () => {
   try {
-    const cfg = normalizeSiteTranslationSettings(settings.siteTranslation);
+    const cfg = ensureSiteTranslationSettingsAvailable();
     const apiKey = decryptSiteTranslationApiKey();
     if (!apiKey) return { ok: false, error: 'DeepSeek API Key is not saved' };
     const response = await requestDeepSeekTranslation(
@@ -58,4 +61,3 @@ ipcMain.handle('site-translation-clear-cache', () => {
   broadcastSiteTranslationStatus({ stage: 'cache-cleared' });
   return getSiteTranslationPublicConfig();
 });
-
