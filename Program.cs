@@ -154,6 +154,7 @@ namespace SeleZenZHMod
                 ["translation ipc v7"] = Contains(asar, "main.js", "SELEZEN_ZH_MOD_MAIN_TRANSLATION_IPC_V7"),
                 ["shell detail speedup"] = Contains(asar, "shell.html", "detailChunkChars = 1500") && Contains(asar, "shell.html", "concurrentRequests = 2"),
                 ["fixed modules v7"] = Contains(asar, "shell.html", "SELEZEN_ZH_MOD_FIXED_MODULES_V7"),
+                ["settings layout v7.1"] = Contains(asar, "shell.html", "SELEZEN_ZH_MOD_SETTINGS_LAYOUT_V7_1"),
                 ["custom dictionary v6"] = Contains(asar, "main.js", "SELEZEN_ZH_MOD_CUSTOM_DICTIONARY_V6") && Contains(asar, "shell.html", "SELEZEN_ZH_MOD_CUSTOM_DICTIONARY_V6"),
                 ["site preload marker"] = Contains(asar, "site-preload.js", "DETAIL_AI_TEXT_CONTAINER_SELECTOR")
             };
@@ -192,6 +193,7 @@ namespace SeleZenZHMod
                     ["translation ipc v7"] = Contains(verify, "main.js", "SELEZEN_ZH_MOD_MAIN_TRANSLATION_IPC_V7"),
                     ["shell detail speedup"] = Contains(verify, "shell.html", "detailChunkChars = 1500") && Contains(verify, "shell.html", "concurrentRequests = 2"),
                     ["fixed modules v7"] = Contains(verify, "shell.html", "SELEZEN_ZH_MOD_FIXED_MODULES_V7"),
+                    ["settings layout v7.1"] = Contains(verify, "shell.html", "SELEZEN_ZH_MOD_SETTINGS_LAYOUT_V7_1"),
                     ["custom dictionary v6"] = Contains(verify, "main.js", "SELEZEN_ZH_MOD_CUSTOM_DICTIONARY_V6") && Contains(verify, "shell.html", "SELEZEN_ZH_MOD_CUSTOM_DICTIONARY_V6"),
                     ["site preload marker"] = Contains(verify, "site-preload.js", "DETAIL_AI_TEXT_CONTAINER_SELECTOR")
                 });
@@ -332,7 +334,7 @@ namespace SeleZenZHMod
         {
             var text = asar.GetText("shell.html");
             var patch = ReadPatch("shell-zh-mod.js").TrimEnd();
-            if (text.Contains("SELEZEN_ZH_MOD_FIXED_MODULES_V7"))
+            if (text.Contains("SELEZEN_ZH_MOD_SETTINGS_LAYOUT_V7_1"))
             {
                 asar.SetText("shell.html", text);
                 return;

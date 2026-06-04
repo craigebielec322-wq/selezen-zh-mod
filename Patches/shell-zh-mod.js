@@ -5,6 +5,7 @@
     // SELEZEN_ZH_MOD_SMALL_CONTROLS_V5
     // SELEZEN_ZH_MOD_CUSTOM_DICTIONARY_V6
     // SELEZEN_ZH_MOD_FIXED_MODULES_V7
+    // SELEZEN_ZH_MOD_SETTINGS_LAYOUT_V7_1
     const selezenZhMod = (() => {
       let config = { enabled: false, model: 'deepseek-v4-flash', hasKey: false, models: ['deepseek-v4-flash', 'deepseek-v4-pro'], cacheSize: 0 };
       let panelReady = false;
@@ -29,12 +30,38 @@
         const style = document.createElement('style');
         style.id = 'selezen-zh-mod-style';
         style.textContent = `
+          #site-translation-panel.zh-mod-panel-full {
+            grid-column: 1 / -1 !important;
+            width: 100% !important;
+            max-width: none !important;
+            min-width: 0 !important;
+            box-sizing: border-box;
+            align-self: stretch;
+          }
+          #site-translation-panel .zh-mod-header-row,
+          #site-translation-panel .zh-mod-status-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 18px;
+            width: 100%;
+          }
+          #site-translation-panel .zh-mod-title-block {
+            min-width: 0;
+          }
+          #site-translation-panel .zh-mod-title {
+            font-weight: 700;
+          }
           #site-translation-panel .zh-mod-field-row {
             display: grid;
-            grid-template-columns: 150px minmax(260px, 1fr) max-content;
-            gap: 12px;
+            grid-template-columns: 160px minmax(420px, 1fr) max-content;
+            gap: 14px;
             align-items: center;
             margin-top: 12px;
+            width: 100%;
+          }
+          #site-translation-panel .zh-mod-model-row {
+            grid-template-columns: 160px minmax(260px, 360px) minmax(260px, 1fr);
           }
           #site-translation-panel .zh-mod-label {
             min-width: 0;
@@ -49,19 +76,37 @@
           #site-translation-panel .zh-mod-field-note {
             white-space: nowrap;
           }
-          #site-translation-panel .zh-mod-actions-row {
-            align-items: flex-start;
-            gap: 16px;
+          #site-translation-panel .zh-mod-cache-inline {
+            display: flex;
+            align-items: baseline;
+            flex-wrap: wrap;
+            gap: 10px;
+            min-width: 0;
           }
-          #site-translation-panel .zh-mod-actions-row .settings-actions {
+          #site-translation-panel .zh-mod-cache-title {
+            font-weight: 600;
+          }
+          #site-translation-panel .zh-mod-status-row .settings-actions {
             display: flex;
             flex-wrap: wrap;
             justify-content: flex-end;
             gap: 8px;
+            margin-left: auto;
+            min-width: max-content;
           }
-          @media (max-width: 960px) {
+          @media (max-width: 1100px) {
             #site-translation-panel .zh-mod-field-row {
               grid-template-columns: 1fr;
+            }
+            #site-translation-panel .zh-mod-header-row,
+            #site-translation-panel .zh-mod-status-row {
+              align-items: flex-start;
+              flex-direction: column;
+            }
+            #site-translation-panel .zh-mod-status-row .settings-actions {
+              justify-content: flex-start;
+              margin-left: 0;
+              min-width: 0;
             }
             #site-translation-panel .zh-mod-key-status,
             #site-translation-panel .zh-mod-field-note {
@@ -88,12 +133,12 @@
         if (!host || document.getElementById('site-translation-panel')) return;
         ensurePanelStyles();
         const group = document.createElement('div');
-        group.className = 'settings-group';
+        group.className = 'settings-group settings-field-wide zh-mod-panel-full';
         group.id = 'site-translation-panel';
         group.innerHTML = `
-          <div class="settings-row">
-            <div>
-              <div>网站 AI 翻译</div>
+          <div class="settings-row zh-mod-header-row">
+            <div class="zh-mod-title-block">
+              <div class="zh-mod-title">网站 AI 翻译</div>
               <div class="note">选择简体中文时，通过 DeepSeek 翻译内嵌网站正文和按钮。</div>
             </div>
             <label class="toggle-line"><input id="site-translation-enabled" type="checkbox" /> <span>启用</span></label>
@@ -103,7 +148,7 @@
             <input id="site-translation-api-key" class="search-box" type="password" autocomplete="off" placeholder="输入 DeepSeek API Key" />
             <span class="note zh-mod-key-status" id="site-translation-key-status">未保存密钥</span>
           </div>
-          <div class="settings-field settings-field-wide zh-mod-field-row">
+          <div class="settings-field settings-field-wide zh-mod-field-row zh-mod-model-row">
             <span class="zh-mod-label">DeepSeek 模型</span>
             <select id="site-translation-model" class="search-box">
               <option value="deepseek-v4-flash">deepseek-v4-flash</option>
@@ -111,11 +156,11 @@
             </select>
             <span class="note zh-mod-field-note">Flash 更快更省；Pro 可用于更复杂文本。</span>
           </div>
-          <div class="settings-row zh-mod-actions-row">
-            <div>
-              <div>翻译缓存</div>
-              <div class="note" id="site-translation-cache-status">缓存: 0</div>
-              <div class="note" id="site-translation-status">就绪</div>
+          <div class="settings-row zh-mod-status-row">
+            <div class="zh-mod-cache-inline">
+              <span class="zh-mod-cache-title">翻译缓存</span>
+              <span class="note" id="site-translation-cache-status">缓存: 0</span>
+              <span class="note" id="site-translation-status">就绪</span>
             </div>
             <div class="settings-actions">
               <button id="site-translation-save" class="accent" type="button">保存配置</button>
